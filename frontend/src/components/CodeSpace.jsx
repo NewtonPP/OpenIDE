@@ -152,7 +152,36 @@ export const CodeSpace = ({ onStatusChange }) => {
 
   },[socket])
 
+  // Paths are relative to the workspace, so an open file can't carry over to a different folder.
+  useEffect(() => {
+    const onWorkspace = () => {
+      setFilePath(undefined)
+      setFileCode(undefined)
+    }
+    socket.on('workspace:opened', onWorkspace)
+    return () => socket.off('workspace:opened', onWorkspace)
+  }, [socket])
+
   const displayPath = normalizePath(FilePath)
+
+  const openPathRef = useRef(displayPath)
+  useEffect(() => {
+    openPathRef.current = displayPath
+  }, [displayPath])
+
+  // Close the editor if its file (or a folder containing it) was deleted.
+  useEffect(() => {
+    const onDeleted = (deletedPath) => {
+      const deleted = normalizePath(deletedPath)
+      const open = openPathRef.current
+      if (open && (open === deleted || open.startsWith(`${deleted}/`))) {
+        setFilePath(undefined)
+        setFileCode(undefined)
+      }
+    }
+    socket.on('file:deleted', onDeleted)
+    return () => socket.off('file:deleted', onDeleted)
+  }, [socket])
   const fileName = displayPath.split('/').pop()
   const language = getLanguage(displayPath)
 

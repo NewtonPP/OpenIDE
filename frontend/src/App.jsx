@@ -3,14 +3,16 @@ import './App.css'
 import {TerminalComponent } from './components/Terminal'
 import { FileManager } from './components/FileManager'
 import { CodeSpace } from './components/CodeSpace'
+import { Madhav } from './components/Madhav'
 import { socketCientContext } from './context/SocketContext'
-import { CodeIcon, FilesIcon, PanelIcon, SearchIcon, SidebarIcon, TerminalIcon } from './components/Icons'
+import { CodeIcon, FilesIcon, PanelIcon, SearchIcon, SidebarIcon, SparkleIcon, TerminalIcon } from './components/Icons'
 import { getLanguageLabel } from './utils/fileTypes'
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 
 const SIDEBAR = { default: 280, min: 180, max: 600, snap: 120 }
 const TERMINAL = { default: 260, min: 100, snap: 60, editorMin: 120 }
+const MADHAV_WIDTH = 340
 
 const readStored = (key, fallback) => {
   try {
@@ -83,6 +85,7 @@ function App() {
   const [terminalVisible, setTerminalVisible] = usePersistentState('terminalVisible', true)
   const [terminalHeight, setTerminalHeight] = usePersistentState('terminalHeight', TERMINAL.default)
   const [terminalMaximized, setTerminalMaximized] = useState(false)
+  const [madhavVisible, setMadhavVisible] = usePersistentState('madhavVisible', false)
   const [dragging, setDragging] = useState(null)
   const [focusSearchSignal, setFocusSearchSignal] = useState(0)
   const [connected, setConnected] = useState(() => Boolean(socket?.connected))
@@ -101,6 +104,7 @@ function App() {
   }, [socket])
 
   const toggleSidebar = useCallback(() => setSidebarVisible((v) => !v), [setSidebarVisible])
+  const toggleMadhav = useCallback(() => setMadhavVisible((v) => !v), [setMadhavVisible])
   const toggleTerminal = useCallback(() => {
     setTerminalVisible((v) => !v)
     setTerminalMaximized(false)
@@ -119,6 +123,7 @@ function App() {
       else if (mod && !ev.shiftKey && !ev.altKey && key === 'j') toggleTerminal()
       else if (mod && !ev.shiftKey && !ev.altKey && key === 'b') toggleSidebar()
       else if (mod && !ev.shiftKey && !ev.altKey && key === 'p') focusSearch()
+      else if (mod && !ev.shiftKey && !ev.altKey && key === 'i') toggleMadhav()
       else handled = false
       if (handled) {
         ev.preventDefault()
@@ -127,7 +132,7 @@ function App() {
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [toggleTerminal, toggleSidebar, focusSearch])
+  }, [toggleTerminal, toggleSidebar, focusSearch, toggleMadhav])
 
   const startDrag = (ev, axis, onMove) => {
     if (ev.button !== 0) return
@@ -176,30 +181,22 @@ function App() {
   return (
     <>
       <div className="flex h-screen w-screen flex-col overflow-hidden bg-ide-bg font-sans text-ide-text antialiased">
-        <header className="grid h-10 shrink-0 grid-cols-[1fr_minmax(0,32rem)_1fr] items-center gap-4 border-b border-ide-border bg-ide-bg px-3">
+        <header className="flex h-10 shrink-0 items-center justify-between gap-4 border-b border-ide-border bg-ide-bg px-3">
           <div className="flex items-center gap-2">
-            <div className="flex h-6 w-6 items-center justify-center rounded-md bg-linear-to-br from-ide-accent to-violet-500 text-white shadow-sm shadow-ide-accent/30">
+            {/* <div className="flex h-6 w-6 items-center justify-center rounded-md bg-linear-to-br from-ide-accent to-violet-500 text-white shadow-sm shadow-ide-accent/30">
               <CodeIcon size={14} strokeWidth={2.25} />
-            </div>
+            </div> */}
             <span className="text-[13px] font-semibold tracking-tight">OpenIDE</span>
           </div>
-          <button
-            type="button"
-            onClick={focusSearch}
-            className="flex h-7 w-full items-center gap-2 rounded-md border border-ide-border bg-ide-sidebar px-3 text-xs text-ide-muted transition-colors hover:border-ide-subtle/60 hover:text-ide-text"
-          >
-            <SearchIcon size={13} />
-            <span className="flex-1 truncate text-center">
-              {status.filePath ? status.filePath : 'Search files in workspace'}
-            </span>
-            <span className="font-mono text-[10px] text-ide-subtle">{isMac ? '⌘P' : 'Ctrl+P'}</span>
-          </button>
           <div className="flex items-center justify-end gap-1">
             <IconToggle title={`Toggle Sidebar (${isMac ? '⌘' : 'Ctrl+'}B)`} active={sidebarVisible} onClick={toggleSidebar}>
               <SidebarIcon size={16} />
             </IconToggle>
             <IconToggle title="Toggle Terminal (Ctrl+`)" active={terminalVisible} onClick={toggleTerminal}>
               <PanelIcon size={16} />
+            </IconToggle>
+            <IconToggle title={`Toggle Madhav (${isMac ? '⌘' : 'Ctrl+'}I)`} active={madhavVisible} onClick={toggleMadhav}>
+              <SparkleIcon size={16} />
             </IconToggle>
           </div>
         </header>
@@ -212,6 +209,9 @@ function App() {
               </ActivityButton>
               <ActivityButton title={`Search Files (${isMac ? '⌘' : 'Ctrl+'}P)`} onClick={focusSearch}>
                 <SearchIcon size={22} strokeWidth={1.5} />
+              </ActivityButton>
+              <ActivityButton title={`Madhav (${isMac ? '⌘' : 'Ctrl+'}I)`} active={madhavVisible} onClick={toggleMadhav}>
+                <SparkleIcon size={22} strokeWidth={1.5} />
               </ActivityButton>
             </div>
             <ActivityButton title="Toggle Terminal (Ctrl+`)" active={terminalVisible} onClick={toggleTerminal}>
@@ -261,6 +261,12 @@ function App() {
               />
             </section>
           </main>
+
+          {madhavVisible && (
+            <aside className="shrink-0 overflow-hidden border-l border-ide-border" style={{ width: MADHAV_WIDTH }}>
+              <Madhav onClose={toggleMadhav} />
+            </aside>
+          )}
         </div>
 
         <footer className="flex h-6 shrink-0 items-center justify-between border-t border-ide-border bg-ide-bg px-2 text-[11px] text-ide-muted">

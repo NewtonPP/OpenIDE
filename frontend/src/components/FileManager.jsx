@@ -2,12 +2,28 @@ import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } 
 import { socketCientContext } from '../context/SocketContext'
 import {
   ChevronRightIcon, CloseIcon, CollapseAllIcon, CopyIcon, ExpandAllIcon,
-  FileIcon, FolderIcon, SearchIcon,
+  FileIcon, FilePlusIcon, FolderIcon, FolderOpenIcon, FolderPlusIcon, SearchIcon, TrashIcon,
 } from './Icons'
+import { OpenFolderDialog } from './OpenFolderDialog'
 import { normalizePath } from '../utils/fileTypes'
 
 const ROW_HEIGHT = 22
+const WORKSPACE_KEY = 'openide:workspace'
+
+const readStoredWorkspace = () => {
+  try { return localStorage.getItem(WORKSPACE_KEY) } catch { return null }
+}
+const storeWorkspace = (path) => {
+  try {
+    path ? localStorage.setItem(WORKSPACE_KEY, path) : localStorage.removeItem(WORKSPACE_KEY)
+  } catch { return }
+}
 const INDENT = 12
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
+const DELETE_HINT = isMac ? '⌘⌫' : 'Del'
+
+// ⌘+Backspace is the Mac "delete" key; elsewhere (and fn+Delete on Mac) it's the Delete key.
+const isDeleteShortcut = (ev) => ev.key === 'Delete' || (isMac && ev.metaKey && ev.key === 'Backspace')
 
 const toTree = (obj, parentPath = '') =>
   Object.entries(obj || {})
@@ -48,6 +64,14 @@ const collectDirectories = (nodes, acc = []) => {
   return acc
 }
 
+const findNode = (nodes, path) => {
+  for (const node of nodes) {
+    if (node.path === path) return node
+    if (node.type === 'directory' && path.startsWith(`${node.path}/`)) return findNode(node.children, path)
+  }
+  return null
+}
+
 const countFiles = (nodes) =>
   nodes.reduce((sum, node) => sum + (node.type === 'directory' ? countFiles(node.children) : 1), 0)
 
@@ -64,22 +88,23 @@ const HighlightedName = ({ name, query }) => {
   )
 }
 
-const ToolbarButton = ({ title, onClick, children }) => (
+const ToolbarButton = ({ title, onClick, disabled, children }) => (
   <button
     type="button"
     title={title}
     aria-label={title}
     onClick={onClick}
-    className="flex h-6 w-6 items-center justify-center rounded text-ide-muted transition-colors hover:bg-ide-hover hover:text-ide-text"
+    disabled={disabled}
+    className="flex h-6 w-6 items-center justify-center rounded text-ide-muted transition-colors hover:bg-ide-hover hover:text-ide-text disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ide-muted"
   >
     {children}
   </button>
 )
 
-const FileNode = ({ node, level = 0, filePath, openFolders, forceOpen, toggleFolder, activePath, onFileSelect, onContextMenu, query }) => {
+const FileNode = ({ node, level = 0, filePath, openFolders, forceOpen, toggleFolder, activePath, onSelect, onFileSelect, onContextMenu, query }) => {
   const isDirectory = node.type === 'directory'
   const isOpen = isDirectory && (forceOpen || openFolders.has(node.path))
-  const isActive = !isDirectory && activePath === node.path
+  const isActive = activePath === node.path
 
   const HandleFileClick = (ev, filePath, node) => {
     ev.stopPropagation()
@@ -94,6 +119,7 @@ const FileNode = ({ node, level = 0, filePath, openFolders, forceOpen, toggleFol
   }
 
   const activate = (ev) => {
+    onSelect(node.path)
     isDirectory && toggleFolder(node.path)
     HandleFileClick(ev, filePath, node)
   }
@@ -161,6 +187,7 @@ const FileNode = ({ node, level = 0, filePath, openFolders, forceOpen, toggleFol
                 forceOpen={forceOpen}
                 toggleFolder={toggleFolder}
                 activePath={activePath}
+                onSelect={onSelect}
                 onFileSelect={onFileSelect}
                 onContextMenu={onContextMenu}
                 query={query}
@@ -173,7 +200,37 @@ const FileNode = ({ node, level = 0, filePath, openFolders, forceOpen, toggleFol
   )
 }
 
-const ContextMenu = ({ menu, onClose, actions }) => {
+const NewItemRow = ({ type, onSubmit, onCancel }) => {
+  const [name, setName] = useState('')
+  const isDirectory = type === 'directory'
+
+  const submit = () => {
+    const trimmed = name.trim().replace(/^\/+|\/+$/g, '')
+    trimmed ? onSubmit(trimmed) : onCancel()
+  }
+
+  return (
+    <div className="flex items-center gap-1.5 pr-2" style={{ paddingLeft: 8, height: ROW_HEIGHT }}>
+      <span className="w-4 shrink-0" />
+      {isDirectory ? <FolderIcon name={name} open={false} /> : <FileIcon name={name} />}
+      <input
+        autoFocus
+        value={name}
+        onChange={(ev) => setName(ev.target.value)}
+        onKeyDown={(ev) => {
+          if (ev.key === 'Enter') submit()
+          else if (ev.key === 'Escape') onCancel()
+        }}
+        onBlur={onCancel}
+        placeholder={isDirectory ? 'Folder name' : 'File name'}
+        spellCheck={false}
+        className="h-[18px] min-w-0 flex-1 border border-ide-accent bg-ide-bg px-1 text-[13px] text-ide-text placeholder:text-ide-subtle focus:outline-none"
+      />
+    </div>
+  )
+}
+
+const ContextMenu =({ menu, onClose, actions }) => {
   const ref = useRef(null)
 
   useEffect(() => {
@@ -230,13 +287,16 @@ const ContextMenu = ({ menu, onClose, actions }) => {
 
 export const FileManager = ({ focusSearchSignal = 0 }) => {
   const { socket } = useContext(socketCientContext)
-  const [files, setFiles] = useState(null)
+  const [files, setFiles] = useState()
   const [openFolders, setOpenFolders] = useState(() => new Set())
   const [query, setQuery] = useState('')
   const [activePath, setActivePath] = useState(null)
   const [workspaceOpen, setWorkspaceOpen] = useState(true)
   const [menu, setMenu] = useState(null)
   const [toast, setToast] = useState(null)
+  const [creating, setCreating] = useState(null)
+  const [workspace, setWorkspace] = useState(null)
+  const [folderDialogOpen, setFolderDialogOpen] = useState(false)
   const searchRef = useRef(null)
 
   useEffect(() => {
@@ -247,7 +307,17 @@ export const FileManager = ({ focusSearchSignal = 0 }) => {
     }
     socket.on('files', receiveFiles)
 
-    return () => socket.off('files', receiveFiles)
+
+    const FileCreated = (files) => {
+      setFiles(files)
+    }
+
+    socket.on('file:created', FileCreated)
+
+    return () => {
+      socket.off('files', receiveFiles)
+      socket.off('file:created', FileCreated)
+    }
   }, [socket])
 
   useEffect(() => {
@@ -255,6 +325,33 @@ export const FileManager = ({ focusSearchSignal = 0 }) => {
     const onSelected = (_code, filepath) => setActivePath(normalizePath(filepath))
     socket.on('file:selected', onSelected)
     return () => socket.off('file:selected', onSelected)
+  }, [socket])
+
+  useEffect(() => {
+    if (!socket) return
+    const onWorkspace = (next) => {
+      setWorkspace(next)
+      setFiles(null)
+      setOpenFolders(new Set())
+      setActivePath(null)
+      setQuery('')
+      setCreating(null)
+    }
+    const onError = (message) => setToast(message)
+    // The server starts every connection in its default folder, so reopen the last one the user picked.
+    const restore = () => {
+      const stored = readStoredWorkspace()
+      if (stored) socket.emit('workspace:open', stored, (res) => !res.ok && storeWorkspace(null))
+    }
+    socket.on('workspace:opened', onWorkspace)
+    socket.on('file:error', onError)
+    socket.on('connect', restore)
+    if (socket.connected) restore()
+    return () => {
+      socket.off('workspace:opened', onWorkspace)
+      socket.off('file:error', onError)
+      socket.off('connect', restore)
+    }
   }, [socket])
 
   useEffect(() => {
@@ -301,6 +398,59 @@ export const FileManager = ({ focusSearchSignal = 0 }) => {
   }, [])
 
   const closeMenu = useCallback(() => setMenu(null), [])
+  const closeFolderDialog = useCallback(() => setFolderDialogOpen(false), [])
+
+  const onFolderOpened = (path) => {
+    storeWorkspace(path)
+    setFolderDialogOpen(false)
+  }
+
+  const startCreate = (type) => {
+    setWorkspaceOpen(true)
+    setCreating(type)
+  }
+
+  const createItem = (name) => {
+    const type = creating
+
+    setCreating(null)
+
+    if (files && Object.prototype.hasOwnProperty.call(files, name)) {
+      setToast(`“${name}” already exists`)
+      return
+    }
+
+    if (type === 'file')
+    {
+      socket?.emit('file:create', name)
+    }
+    else{
+      socket?.emit('folder:create', name)
+    }
+
+    // socket?.emit(
+    //   type === 'file' ? 'file:create' : 'folder:create', name
+    // )
+  }
+
+  const deleteNode = (path) => {
+    const node = tree && path ? findNode(tree, path) : null
+    if (!node) return
+    const message = node.type === 'directory'
+      ? `Delete the folder “${node.name}” and everything in it?`
+      : `Delete “${node.name}”?`
+    if (!window.confirm(`${message}\n\nThis can't be undone.`)) return
+    socket.emit('file:delete', node.path)
+    setActivePath(null)
+  }
+
+  const onTreeKeyDown = (ev) => {
+    if (ev.target.tagName === 'INPUT' || !isDeleteShortcut(ev)) return
+    ev.preventDefault()
+    deleteNode(activePath)
+  }
+
+  const selectedNode = tree && activePath ? findNode(tree, activePath) : null
 
   const copy = (text, label) => {
     navigator.clipboard?.writeText(text).then(
@@ -329,6 +479,8 @@ export const FileManager = ({ focusSearchSignal = 0 }) => {
       { key: 'path', label: 'Copy Path', icon: <CopyIcon size={14} />, onClick: () => copy(node.path, 'Path') },
       { key: 'name', label: 'Copy Name', icon: <CopyIcon size={14} />, onClick: () => copy(node.name, 'Name') },
       { key: 'd2', divider: true },
+      { key: 'delete', label: 'Delete', hint: DELETE_HINT, icon: <TrashIcon size={14} />, onClick: () => deleteNode(node.path) },
+      { key: 'd3', divider: true },
       { key: 'collapse', label: 'Collapse All Folders', icon: <CollapseAllIcon size={14} />, onClick: collapseAll },
     ]
   }
@@ -338,6 +490,9 @@ export const FileManager = ({ focusSearchSignal = 0 }) => {
       <div className="flex h-9 shrink-0 items-center justify-between pl-4 pr-2">
         <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-ide-muted">Explorer</span>
         <div className="flex items-center gap-0.5">
+          <ToolbarButton title="Open Folder…" onClick={() => setFolderDialogOpen(true)}>
+            <FolderOpenIcon size={15} />
+          </ToolbarButton>
           <ToolbarButton title="Search files (⌘/Ctrl+P)" onClick={() => searchRef.current?.focus()}>
             <SearchIcon size={15} />
           </ToolbarButton>
@@ -375,22 +530,40 @@ export const FileManager = ({ focusSearchSignal = 0 }) => {
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={() => setWorkspaceOpen((o) => !o)}
-        className="flex h-6 shrink-0 items-center gap-1 border-y border-ide-border/60 px-1.5 text-[11px] font-bold uppercase tracking-wider text-ide-text/90 hover:bg-ide-hover"
-      >
-        <ChevronRightIcon size={14} strokeWidth={2.25} className={`transition-transform duration-150 ${workspaceOpen ? 'rotate-90' : ''}`} />
-        <span className="flex-1 truncate text-left">Workspace</span>
-        {tree && (
-          <span className="rounded-full bg-ide-hover px-1.5 py-px text-[10px] font-medium normal-case tracking-normal text-ide-muted">
-            {fileCount} {fileCount === 1 ? 'file' : 'files'}
-          </span>
-        )}
-      </button>
+      <div className="flex h-6 shrink-0 items-center border-y border-ide-border/60 hover:bg-ide-hover">
+        <button
+          type="button"
+          onClick={() => setWorkspaceOpen((o) => !o)}
+          className="flex h-full min-w-0 flex-1 items-center gap-1 px-1.5 text-[11px] font-bold uppercase tracking-wider text-ide-text/90"
+        >
+          <ChevronRightIcon size={14} strokeWidth={2.25} className={`transition-transform duration-150 ${workspaceOpen ? 'rotate-90' : ''}`} />
+          <span className="flex-1 truncate text-left" title={workspace?.path}>{workspace?.name ?? 'Workspace'}</span>
+          {tree && (
+            <span className="rounded-full bg-ide-hover px-1.5 py-px text-[10px] font-medium normal-case tracking-normal text-ide-muted">
+              {fileCount} {fileCount === 1 ? 'file' : 'files'}
+            </span>
+          )}
+        </button>
+        <div className="flex items-center gap-0.5 pl-1 pr-1">
+          <ToolbarButton title="New File" onClick={() => startCreate('file')}>
+            <FilePlusIcon size={14} />
+          </ToolbarButton>
+          <ToolbarButton title="New Folder" onClick={() => startCreate('directory')}>
+            <FolderPlusIcon size={14} />
+          </ToolbarButton>
+          <ToolbarButton
+            title={selectedNode ? `Delete “${selectedNode.name}” (${DELETE_HINT})` : 'Delete (select a file or folder first)'}
+            disabled={!selectedNode}
+            onClick={() => deleteNode(activePath)}
+          >
+            <TrashIcon size={14} />
+          </ToolbarButton>
+        </div>
+      </div>
 
       {workspaceOpen && (
-        <div role="tree" className="group/tree ide-scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden py-1">
+        <div role="tree" onKeyDown={onTreeKeyDown} className="group/tree ide-scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden py-1">
+          {creating && <NewItemRow type={creating} onSubmit={createItem} onCancel={() => setCreating(null)} />}
           {!visibleTree ? (
             <div className="space-y-1.5 px-4 py-2" aria-label="Loading files">
               {[70, 55, 80, 45, 62, 50].map((w, i) => (
@@ -420,6 +593,7 @@ export const FileManager = ({ focusSearchSignal = 0 }) => {
                 forceOpen={Boolean(normalizedQuery)}
                 toggleFolder={toggleFolder}
                 activePath={activePath}
+                onSelect={setActivePath}
                 onFileSelect={onFileSelect}
                 onContextMenu={onContextMenu}
                 query={normalizedQuery}
@@ -433,6 +607,10 @@ export const FileManager = ({ focusSearchSignal = 0 }) => {
         <div className="pointer-events-none mx-3 mb-3 rounded-md border border-ide-border bg-ide-elevated px-3 py-1.5 text-center text-xs text-ide-text shadow-lg">
           {toast}
         </div>
+      )}
+
+      {folderDialogOpen && (
+        <OpenFolderDialog initialPath={workspace?.path} onOpened={onFolderOpened} onClose={closeFolderDialog} />
       )}
 
       {menu && <ContextMenu menu={menu} onClose={closeMenu} actions={menuActions(menu.node)} />}
