@@ -107,10 +107,10 @@ const MOD = isMac ? '⌘' : 'Ctrl'
 const Welcome = () => (
   <div className="flex h-full w-full select-none items-center justify-center bg-ide-editor p-8">
     <div className="flex max-w-md flex-col items-center text-center">
-      <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-2xl bg-linear-to-br from-ide-accent/25 to-violet-500/20 ring-1 ring-ide-accent/30">
-        <CodeIcon size={40} strokeWidth={1.5} className="text-ide-accent" />
-      </div>
-      <h1 className="text-2xl font-semibold tracking-tight text-ide-text">OpenIDE</h1>
+      {/* <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-2xl bg-linear-to-br bg-black">
+        <CodeIcon size={40} strokeWidth={1.5} className="text-white" />
+      </div> */}
+      <h1 className="text-4xl tracking-tight text-ide-text font-bold"> {'</>'} OpenIDE</h1>
       <p className="mt-1.5 text-sm text-ide-muted">Select a file from the explorer to start editing.</p>
 
       <div className="mt-8 grid w-full grid-cols-[1fr_auto] gap-x-6 gap-y-2.5 text-left text-[13px] text-ide-muted">

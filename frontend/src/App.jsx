@@ -12,7 +12,7 @@ const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigat
 
 const SIDEBAR = { default: 280, min: 180, max: 600, snap: 120 }
 const TERMINAL = { default: 260, min: 100, snap: 60, editorMin: 120 }
-const MADHAV_WIDTH = 340
+const MADHAV = { default: 340, min: 260, max: 800, snap: 160, editorMin: 240 }
 
 const readStored = (key, fallback) => {
   try {
@@ -86,6 +86,7 @@ function App() {
   const [terminalHeight, setTerminalHeight] = usePersistentState('terminalHeight', TERMINAL.default)
   const [terminalMaximized, setTerminalMaximized] = useState(false)
   const [madhavVisible, setMadhavVisible] = usePersistentState('madhavVisible', false)
+  const [madhavWidth, setMadhavWidth] = usePersistentState('madhavWidth', MADHAV.default)
   const [dragging, setDragging] = useState(null)
   const [focusSearchSignal, setFocusSearchSignal] = useState(0)
   const [connected, setConnected] = useState(() => Boolean(socket?.connected))
@@ -151,7 +152,7 @@ function App() {
   const startSidebarDrag = (ev) => {
     const startX = ev.clientX
     const startWidth = sidebarWidth
-    startDrag(ev, 'x', (e) => {
+    startDrag(ev, 'sidebar', (e) => {
       const next = startWidth + (e.clientX - startX)
       if (next < SIDEBAR.snap) {
         setSidebarVisible(false)
@@ -163,7 +164,7 @@ function App() {
   }
 
   const startTerminalDrag = (ev) => {
-    startDrag(ev, 'y', (e) => {
+    startDrag(ev, 'terminal', (e) => {
       const rect = mainRef.current?.getBoundingClientRect()
       if (!rect) return
       const next = rect.bottom - e.clientY
@@ -173,6 +174,22 @@ function App() {
       }
       setTerminalVisible(true)
       setTerminalHeight(Math.min(rect.height - TERMINAL.editorMin, Math.max(TERMINAL.min, next)))
+    })
+  }
+
+  const startMadhavDrag = (ev) => {
+    const startX = ev.clientX
+    const startWidth = madhavWidth
+    startDrag(ev, 'madhav', (e) => {
+      const next = startWidth - (e.clientX - startX)
+      if (next < MADHAV.snap) {
+        setMadhavVisible(false)
+        return
+      }
+      setMadhavVisible(true)
+      const mainLeft = mainRef.current?.getBoundingClientRect().left ?? 0
+      const max = Math.min(MADHAV.max, window.innerWidth - mainLeft - MADHAV.editorMin)
+      setMadhavWidth(Math.max(MADHAV.min, Math.min(max, next)))
     })
   }
 
@@ -186,7 +203,7 @@ function App() {
             {/* <div className="flex h-6 w-6 items-center justify-center rounded-md bg-linear-to-br from-ide-accent to-violet-500 text-white shadow-sm shadow-ide-accent/30">
               <CodeIcon size={14} strokeWidth={2.25} />
             </div> */}
-            <span className="text-[13px] font-semibold tracking-tight">OpenIDE</span>
+            <span className="text-[13px] tracking-tight font-bold">{'</>'}</span>
           </div>
           <div className="flex items-center justify-end gap-1">
             <IconToggle title={`Toggle Sidebar (${isMac ? '⌘' : 'Ctrl+'}B)`} active={sidebarVisible} onClick={toggleSidebar}>
@@ -225,7 +242,7 @@ function App() {
           {sidebarVisible && (
             <Sash
               direction="x"
-              active={dragging === 'x'}
+              active={dragging === 'sidebar'}
               onPointerDown={startSidebarDrag}
               onDoubleClick={() => setSidebarWidth(SIDEBAR.default)}
             />
@@ -238,7 +255,7 @@ function App() {
             {terminalVisible && !terminalMaximized && (
               <Sash
                 direction="y"
-                active={dragging === 'y'}
+                active={dragging === 'terminal'}
                 onPointerDown={startTerminalDrag}
                 onDoubleClick={() => setTerminalHeight(TERMINAL.default)}
               />
@@ -263,9 +280,17 @@ function App() {
           </main>
 
           {madhavVisible && (
-            <aside className="shrink-0 overflow-hidden border-l border-ide-border" style={{ width: MADHAV_WIDTH }}>
-              <Madhav onClose={toggleMadhav} />
-            </aside>
+            <>
+              <Sash
+                direction="x"
+                active={dragging === 'madhav'}
+                onPointerDown={startMadhavDrag}
+                onDoubleClick={() => setMadhavWidth(MADHAV.default)}
+              />
+              <aside className="shrink-0 overflow-hidden" style={{ width: madhavWidth }}>
+                <Madhav onClose={toggleMadhav} />
+              </aside>
+            </>
           )}
         </div>
 
@@ -295,7 +320,7 @@ function App() {
         </footer>
 
         {dragging && (
-          <div className={`fixed inset-0 z-50 ${dragging === 'x' ? 'cursor-col-resize' : 'cursor-row-resize'}`} style={{ userSelect: 'none' }} />
+          <div className={`fixed inset-0 z-50 ${dragging === 'terminal' ? 'cursor-row-resize' : 'cursor-col-resize'}`} style={{ userSelect: 'none' }} />
         )}
       </div>
     </>
